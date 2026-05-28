@@ -338,7 +338,27 @@ class SmartMeeting(BaseResource):
     Full CRUD against ``/api/smart-meetings`` plus planner actions on
     individual instances.
 
+    The editable series fields (title, durations, recurrence, etc.) live on
+    :class:`CreateSmartMeetingRequest` / :class:`PatchSmartMeetingRequest`,
+    not on this resource — so create and update go through ``create()`` and
+    ``update()`` rather than constructing/mutating the resource directly.
+
     Example usage::
+
+        from reclaim_sdk.resources.smart_meeting import (
+            SmartMeeting,
+            CreateSmartMeetingRequest,
+            PatchSmartMeetingRequest,
+            Organizer,
+            RecurrenceDefinition,
+        )
+        from reclaim_sdk.enums import (
+            SmartSeriesEventType,
+            DefenseAggression,
+            TimePolicyType,
+            Frequency,
+            SnoozeOption,
+        )
 
         # List all smart meetings
         meetings = SmartMeeting.list()
@@ -347,24 +367,24 @@ class SmartMeeting(BaseResource):
         meeting = SmartMeeting.get(4559766)
 
         # Create a new smart meeting
-        meeting = SmartMeeting(
-            title="Weekly Sync",
-            event_type=SmartSeriesEventType.TEAM_MEETING,
-            ideal_time="10:00:00",
-            duration_min_mins=30,
-            defense_aggression=DefenseAggression.DEFAULT,
-            organizer=Organizer(time_policy_type=TimePolicyType.WORK),
-            recurrence=RecurrenceDefinition(
-                frequency=Frequency.WEEKLY,
-                ideal_days=["MONDAY", "WEDNESDAY", "FRIDAY"],
-                interval=2,
-            ),
+        meeting = SmartMeeting.create(
+            CreateSmartMeetingRequest(
+                title="Weekly Sync",
+                event_type=SmartSeriesEventType.TEAM_MEETING,
+                ideal_time="10:00:00",
+                duration_min_mins=30,
+                defense_aggression=DefenseAggression.DEFAULT,
+                organizer=Organizer(time_policy_type=TimePolicyType.WORK),
+                recurrence=RecurrenceDefinition(
+                    frequency=Frequency.WEEKLY,
+                    ideal_days=["MONDAY", "WEDNESDAY", "FRIDAY"],
+                    interval=2,
+                ),
+            )
         )
-        meeting.save()
 
-        # Patch (update)
-        meeting.title = "Biweekly Sync"
-        meeting.save()
+        # Update (PATCH) — send only the fields that change
+        meeting.update(PatchSmartMeetingRequest(title="Biweekly Sync"))
 
         # Delete
         meeting.delete()
@@ -373,7 +393,7 @@ class SmartMeeting(BaseResource):
         meeting.lock()
         meeting.unlock()
         meeting.skip()
-        meeting.reschedule()
+        meeting.reschedule(SnoozeOption.NEXT_WEEK)
         meeting.move(start, end)
         meeting.clear_exceptions()
     """
@@ -411,6 +431,30 @@ class SmartMeeting(BaseResource):
         data.pop("lineage_id", None)
         data.pop("lineageId", None)
         return data
+
+    def update(self, request: PatchSmartMeetingRequest) -> "SmartMeeting":
+        """PATCH the editable fields of this series.
+
+        The editable fields (title, durations, recurrence, etc.) live on
+        :class:`PatchSmartMeetingRequest`, not on the resource itself — so
+        updates go through this method rather than attribute assignment +
+        ``save()``. Only set (non-None) fields are sent. The server response
+        refreshes this instance in place.
+
+        Args:
+            request: A :class:`PatchSmartMeetingRequest` with the changes.
+        """
+        if self.id is None:
+            raise ValueError(
+                "Cannot update a smart meeting without a lineageId. "
+                "Fetch it with SmartMeeting.get() first."
+            )
+        response = self._client.patch(
+            f"{self.ENDPOINT}/{self.id}",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self.__dict__.update(self.from_api_data(response).__dict__)
+        return self
 
     # ------------------------------------------------------------------
     # Planner actions

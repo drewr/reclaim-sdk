@@ -3,6 +3,8 @@
 Uses respx to mock HTTP calls — no live API access needed.
 """
 
+import json
+
 import httpx
 import pytest
 from datetime import datetime, timezone
@@ -335,6 +337,48 @@ def test_patch_request_excludes_none_fields(client, mock_api):
 
 
 # ---------------------------------------------------------------------------
+# Tests — update
+# ---------------------------------------------------------------------------
+
+
+def test_update_sends_patch_with_request_body(client, mock_api):
+    route = mock_api.patch("/api/smart-meetings/4559766").mock(
+        return_value=httpx.Response(200, json={
+            "lineageId": 4559766,
+            "type": "MEETING",
+            "status": "ACTIVE",
+            "enabled": True,
+            "activeSeries": {"title": "Biweekly Sync", "eventId": "evt-123"},
+            "periods": [],
+        })
+    )
+
+    meeting = SmartMeeting(
+        lineage_id=4559766,
+        id=4559766,
+        type="MEETING",
+        status="ACTIVE",
+        enabled=True,
+        active_series=SmartSeriesView(title="Weekly Sync", event_id="evt-123"),
+        periods=[],
+    )
+    result = meeting.update(PatchSmartMeetingRequest(title="Biweekly Sync"))
+
+    assert route.called
+    sent = json.loads(route.calls.last.request.content)
+    assert sent == {"title": "Biweekly Sync"}
+    # response is applied back onto the instance and returned
+    assert result is meeting
+    assert meeting.active_series.title == "Biweekly Sync"
+
+
+def test_update_without_id_raises(client):
+    meeting = SmartMeeting(type="MEETING", status="ACTIVE", enabled=True)
+    with pytest.raises(ValueError, match="lineageId"):
+        meeting.update(PatchSmartMeetingRequest(title="X"))
+
+
+# ---------------------------------------------------------------------------
 # Tests — delete
 # ---------------------------------------------------------------------------
 
@@ -365,13 +409,13 @@ def test_delete_uses_lineage_id(client, mock_api):
 # ---------------------------------------------------------------------------
 
 
-def test_from_api_data_sets_id_from_lineage_id():
+def test_from_api_data_sets_id_from_lineage_id(client):
     meeting = SmartMeeting.from_api_data(SAMPLE_RESPONSE)
     assert meeting.id == 4559766
     assert meeting.lineage_id == 4559766
 
 
-def test_from_api_data_handles_missing_lineage_id():
+def test_from_api_data_handles_missing_lineage_id(client):
     data = {"type": "MEETING", "status": "ACTIVE", "enabled": True}
     meeting = SmartMeeting.from_api_data(data)
     assert meeting.id is None
@@ -383,7 +427,7 @@ def test_from_api_data_handles_missing_lineage_id():
 # ---------------------------------------------------------------------------
 
 
-def test_to_api_data_excludes_lineage_id():
+def test_to_api_data_excludes_lineage_id(client):
     meeting = SmartMeeting.from_api_data(SAMPLE_RESPONSE)
     data = meeting.to_api_data()
     assert "lineage_id" not in data
